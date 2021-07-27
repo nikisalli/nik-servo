@@ -180,7 +180,6 @@ void handler::handle(){
                 write_led();
                 break;
             case SERVO_MOVE_TIME_WRITE_ID:{
-                digitalWrite(A4, HIGH);
                 int32_t pos = (uint16_t)params[0] | ((uint16_t)(params[1]) << 8); // get 16 bit unsigned value
                 pos = pos > 32767 ? pos - 65536 : pos; // make it negative if overflowed
                 set_point = fmap(pos, -250, 1250, 0, 360);  // -250..1250 -> 0..360

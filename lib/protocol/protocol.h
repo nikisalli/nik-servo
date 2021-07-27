@@ -57,14 +57,16 @@
 #define EEPROM_ID                          0
 #define EEPROM_ANGLE_OFFSET                1
 
-class handler{
-    uint8_t id = 0;
-    int16_t angle_offset;
-    float set_point = 150;
-    bool loaded = false;
-    bool led = false;
+float fmap(float x, float in_min, float in_max, float out_min, float out_max);
 
+class handler{
     public:
+        uint8_t id = 0;
+        int16_t angle_offset;
+        volatile float set_point = 150; // this is needed inside the control loop isr
+        volatile bool loaded = false; // this too
+        bool led = false;
+
         handler();                 // initialize with eeprom vals
         void handle();             // parse serial bus
         void write_id();

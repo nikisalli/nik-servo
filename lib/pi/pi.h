@@ -2,13 +2,12 @@
 #define PI_H
 
 class pi_controller{
-    float ti; // integral time constant
-    float kc; // controller gain
-    float setpoint;
-    float integral;
-    unsigned long prev_time;
-
     public:
+        float ti; // integral time constant
+        float kc; // controller gain
+        float integral;
+        unsigned long prev_time;
+
         float update(float input);
 };
 
