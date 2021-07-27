@@ -1,15 +1,18 @@
 #include <Arduino.h>
 #include "protocol.h"
-#include "pi.h"
 
 #define F_CPU 16000000L
 
 handler proto; // protocol handler instance
-pi_controller pos_controller;
-pi_controller cur_controller;
+
+float pos_integral = 0;
+float cur_integral = 0;
 
 // hardware control
 void set_motor(int16_t val){
+    // clip to working range
+    val = val > 255 ? 255 : val;
+    val = val < -255 ? -255 : val;
     if(val > 0){
         OCR1A = 0;
         OCR1B = val;
@@ -19,20 +22,16 @@ void set_motor(int16_t val){
     }
 }
 
-float get_pos(){
-    return fmap(analogRead(A1), 0, 1023, 0, 360);
-}
-
-float get_cur(){
-    return fmap(analogRead(A0), 0, 1023, -12.5, 12.5);
-}
-
 // control loop update isr
 ISR(TIMER2_COMPA_vect){
     PORTC |= _BV(PC4);
 
-    float error = proto.set_point - get_pos();
-    set_motor(pos_controller.update(error));
+    float pos_error = get_pos() - proto.set_point;
+    // float torque_error = get_torque() - proto.max_torque;
+
+    pos_integral += pos_error * 0.002;  // dt is constant and equal to 1/500Hz = 0.002s
+    float pos_out = proto.pos_kc * (pos_error + proto.pos_inv_ti * pos_integral);
+    set_motor(pos_out);
 
     PORTC &= ~(_BV(PC4));
 }
@@ -63,12 +62,6 @@ int main(void){
     TCCR2B = _BV(CS22) | _BV(CS21);    // set prescaler to 32
     OCR2A = 0x7C;          // set compare match threshold to obtain 500Hz
     TIMSK2 |= _BV(OCIE2A); // enable timer 2 overflow interrupt
-
-    // initialize pi controllers
-    pos_controller.kc = 0.1;
-    pos_controller.ti = INFINITY;
-    cur_controller.kc = 0.;
-    cur_controller.ti = INFINITY;
 
     while(1){
         proto.handle();

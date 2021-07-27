@@ -4,6 +4,19 @@
 
 #include "protocol.h"
 
+// hardware
+float get_pos(){
+    return analogRead(A1) / 2.841666666f; // 0..1023 -> 0..360
+}
+
+float get_cur(){
+    return fmap(analogRead(A0), 0, 1023, -12.5, 12.5);
+}
+
+float get_torque(){
+    return fmap(analogRead(A0), 0, 1023, -8.75, 8.75);
+}
+
 // helpers
 uint8_t cpl2int(uint8_t val){
     return 0x80 & val ? (0x7F & val) - 0x80 : val;  // fast inverse 2's complement
@@ -24,6 +37,17 @@ void servo_tx_enb() {
 
 void servo_rx_enb() {
 	PORTC &= ~_BV(PC3);
+}
+
+uint8_t wait_for_bytes(uint8_t num, uint8_t timeout){
+    uint16_t iters = 0;
+    while(Serial.available() < num){
+        if(iters++ > timeout){
+            return 0;
+        }
+        delayMicroseconds(1000);
+    }
+    return 1;
 }
 
 // packet construction
@@ -47,15 +71,17 @@ void servo_write(Args... args) {
     servo_rx_enb();
 }
 
-// packets
-
+// constructor
 handler::handler(){
     servo_rx_enb(); // set rx mode
     // read stored params from eeprom
-    id = eeprom_read_byte((uint8_t*)EEPROM_ID);
-    angle_offset = cpl2int(eeprom_read_byte((uint8_t*)EEPROM_ANGLE_OFFSET));
+    id = eeprom_read_byte(EEPROM_ID);
+    angle_offset = cpl2int(eeprom_read_byte(EEPROM_ANGLE_OFFSET));
+    pos_kc = (eeprom_read_byte(EEPROM_POS_KC_L) | ((eeprom_read_byte(EEPROM_POS_KC_H) << 8))) / 100.f;
+    torque_inv_ti = (eeprom_read_byte(EEPROM_TORQUE_INV_TI_L) | ((eeprom_read_byte(EEPROM_TORQUE_INV_TI_H) << 8))) / 100.f;
 }
 
+// packets
 void handler::write_id(){
     servo_write(
         id,
@@ -118,17 +144,65 @@ void handler::write_move_time(){
 	);
 }
 
+void handler::write_cur(){
+    uint16_t cur = analogRead(A0);
+    servo_write(
+        id,
+        SERVO_CUR_READ_LENGTH_RX,
+        SERVO_CUR_READ_ID,
+        (uint8_t)(cur & 0xFF),
+        (uint8_t)(cur >> 8)
+	);
+}
+
+void handler::write_torque_limit(){
+    uint16_t torque_limit = max_torque * 1000;
+    servo_write(
+        id,
+        SERVO_TORQUE_LIMIT_READ_LENGTH_RX,
+        SERVO_TORQUE_LIMIT_READ_ID,
+        (uint8_t)(torque_limit & 0xFF),
+        (uint8_t)(torque_limit >> 8)
+	);
+}
+
+void handler::write_pos_params(){
+    uint16_t kc = pos_kc * 100;
+    uint16_t ti = pos_inv_ti * 100;
+    servo_write(
+        id,
+        SERVO_POS_PARAMS_READ_LENGTH_RX,
+        SERVO_POS_PARAMS_READ_ID,
+        (uint8_t)(kc & 0xFF),
+        (uint8_t)(kc >> 8),
+        (uint8_t)(ti & 0xFF),
+        (uint8_t)(ti >> 8)
+	);
+}
+
+void handler::write_torque_params(){
+    uint16_t kc = torque_kc * 100;
+    uint16_t ti = torque_inv_ti * 100;
+    servo_write(
+        id,
+        SERVO_TORQUE_PARAMS_READ_LENGTH_RX,
+        SERVO_TORQUE_PARAMS_READ_ID,
+        (uint8_t)(kc & 0xFF),
+        (uint8_t)(kc >> 8),
+        (uint8_t)(ti & 0xFF),
+        (uint8_t)(ti >> 8)
+	);
+}
+
 // handler
 void handler::handle(){
-    while(!Serial.available());              // wait for one byte at least
+    wait_for_bytes(3, 10);                   // wait for 3 bytes with 10ms timeout
     if(Serial.read() != HEADER_BYTE) return; // match first header byte
-    while(!Serial.available());              // wait for another byte
     if(Serial.read() != HEADER_BYTE) return; // match second header byte
-    while(!Serial.available());              // wait for another byte
     uint8_t res = Serial.read();             // if the header is matched get id
     if(res != id && res != SERVO_BROADCAST_ID) return; // check if the command is directed to us or broadcasted
 
-    while(Serial.available() < 2);          // wait for length and cmd if still not there
+    wait_for_bytes(2, 10);
     uint8_t length = Serial.read();         // read length
     uint8_t cmd = Serial.read();            // read cmd id
     uint8_t _id = res;
@@ -137,28 +211,26 @@ void handler::handle(){
 
     uint8_t sum = _id + length + cmd;
 
-    while(Serial.available() < length - 2);  //wait for remaining bytes
+    wait_for_bytes(length - 2, 10);
 
     for(uint8_t i = 0; i < length - 2; i++){ //iterate until the packet has been fully read
         params[i] = Serial.read();
         if(i != length - 3) sum += params[i];   //do not sum checksum
     }
 
-    // delayMicroseconds(100);
-
     if(((~sum) & 0xFF) != (params[length - 3] & 0xFF)) return; //match checksum
     
     if (_id == id) { // if the command is directed to us
         switch (cmd) {
             case SERVO_ID_WRITE_ID: // set id
-                eeprom_write_byte((uint8_t*)EEPROM_ID, params[0]); // parameter 1 is our new id
+                eeprom_write_byte(EEPROM_ID, params[0]); // parameter 1 is our new id
                 id = params[0]; // update our id
                 break;
             case SERVO_ANGLE_OFFSET_ADJUST_ID: // set angle offset
                 angle_offset = cpl2int(params[0]);
                 break;
             case SERVO_ANGLE_OFFSET_WRITE_ID: // write angle offset to eeprom
-                eeprom_write_byte((uint8_t*)EEPROM_ANGLE_OFFSET, int2cpl(angle_offset));
+                eeprom_write_byte(EEPROM_ANGLE_OFFSET, int2cpl(angle_offset));
                 break;
             case SERVO_ANGLE_OFFSET_READ_ID:
                 write_angle_offset();
@@ -180,7 +252,7 @@ void handler::handle(){
                 write_led();
                 break;
             case SERVO_MOVE_TIME_WRITE_ID:{
-                int32_t pos = (uint16_t)params[0] | ((uint16_t)(params[1]) << 8); // get 16 bit unsigned value
+                int32_t pos = params[0] | ((params[1]) << 8); // get 16 bit unsigned value
                 pos = pos > 32767 ? pos - 65536 : pos; // make it negative if overflowed
                 set_point = fmap(pos, -250, 1250, 0, 360);  // -250..1250 -> 0..360
                 // time is ignored
@@ -188,6 +260,37 @@ void handler::handle(){
             }
             case SERVO_MOVE_TIME_READ_ID:
                 write_move_time();
+                break;
+            case SERVO_CUR_READ_ID:
+                write_cur();
+                break;
+            case SERVO_TORQUE_LIMIT_WRITE_ID:
+                max_torque = fmap(params[0] | ((params[1]) << 8), 0, 2000, 0, 2);
+                break;
+            case SERVO_TORQUE_LIMIT_READ_ID:
+                write_torque_limit();
+                break;
+            case SERVO_POS_PARAMS_WRITE_ID:
+                pos_kc = (params[0] | ((params[1]) << 8)) / 100.f;
+                pos_inv_ti = (params[2] | ((params[3]) << 8)) / 100.f;
+                eeprom_write_byte(EEPROM_POS_KC_L, params[0]);
+                eeprom_write_byte(EEPROM_POS_KC_H, params[1]);
+                eeprom_write_byte(EEPROM_POS_INV_TI_L, params[2]);
+                eeprom_write_byte(EEPROM_POS_INV_TI_H, params[3]);
+                break;
+            case SERVO_POS_PARAMS_READ_ID:
+                write_pos_params();
+                break;
+            case SERVO_TORQUE_PARAMS_WRITE_ID:
+                torque_kc = (params[0] | ((params[1]) << 8)) / 100.f;
+                torque_inv_ti = (params[2] | ((params[3]) << 8)) / 100.f;
+                eeprom_write_byte(EEPROM_TORQUE_KC_L, params[0]);
+                eeprom_write_byte(EEPROM_TORQUE_KC_H, params[1]);
+                eeprom_write_byte(EEPROM_TORQUE_INV_TI_L, params[2]);
+                eeprom_write_byte(EEPROM_TORQUE_INV_TI_H, params[3]);
+                break;
+            case SERVO_TORQUE_PARAMS_READ_ID:
+                write_torque_params();
                 break;
         }
     } else if(_id == 0xFE && cmd == SERVO_ID_READ_ID) {
