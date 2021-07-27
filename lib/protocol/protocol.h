@@ -11,6 +11,13 @@
 #define SERVO_BROADCAST_ID                 254
 
 // commands
+#define SERVO_MOVE_TIME_WRITE_ID            1
+#define SERVO_MOVE_TIME_WRITE_LENGTH        7
+
+#define SERVO_MOVE_TIME_READ_ID             2
+#define SERVO_MOVE_TIME_READ_LENGTH_TX      3
+#define SERVO_MOVE_TIME_READ_LENGTH_RX      7
+
 #define SERVO_ID_WRITE_ID                   13
 #define SERVO_ID_WRITE_LENGTH               4
 
@@ -53,7 +60,7 @@
 class handler{
     uint8_t id = 0;
     int16_t angle_offset;
-    float set_point = 0;
+    float set_point = 150;
     bool loaded = false;
     bool led = false;
 
@@ -65,7 +72,7 @@ class handler{
         void write_pos();
         void write_loaded();
         void write_led();
-
+        void write_move_time();
 };
 
 #endif

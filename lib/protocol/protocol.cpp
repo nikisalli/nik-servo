@@ -13,6 +13,10 @@ uint8_t int2cpl(uint8_t val){
     return val > 0 ? val : (~val) + 1;
 }
 
+float fmap(float x, float in_min, float in_max, float out_min, float out_max) {
+  return (float)(x - in_min) * (out_max - out_min) / (float)(in_max - in_min) + out_min;
+}
+
 // uart handling
 void servo_tx_enb() {
     PORTC |= _BV(PC3);
@@ -46,12 +50,8 @@ void servo_write(Args... args) {
 // packets
 
 handler::handler(){
-    Serial.begin(115200); // initialize uart at 1Mbaud
-    pinMode(A3, OUTPUT); // uart tx-rx controller switch
-    pinMode(A4, OUTPUT);
-    servo_rx_enb();
-    pinMode(A1, INPUT); // position feedback
-    // read stored data from eeprom
+    servo_rx_enb(); // set rx mode
+    // read stored params from eeprom
     id = eeprom_read_byte((uint8_t*)EEPROM_ID);
     angle_offset = cpl2int(eeprom_read_byte((uint8_t*)EEPROM_ANGLE_OFFSET));
 }
@@ -75,14 +75,14 @@ void handler::write_angle_offset(){
 }
 
 void handler::write_pos(){
-    // int16_t intpos = (map(analogRead(A1), 0, 1023, -250, 1250)); // 0..240 to 0..1000
-    uint16_t uintpos = (uint16_t)(map(analogRead(A1), 0, 1023, -250, 1250));
+    // this purposefully overflows to let the master know it is a negative value
+    uint16_t pos = (uint16_t)(fmap(analogRead(A1), 0, 1023, -250, 1250));
     servo_write(
         id,
         SERVO_POS_READ_LENGTH_RX,
         SERVO_POS_READ_ID,
-        (uint8_t)(uintpos & 0xFF),
-        (uint8_t)(uintpos >> 8)
+        (uint8_t)(pos & 0xFF),
+        (uint8_t)(pos >> 8)
 	);
 }
 
@@ -100,7 +100,21 @@ void handler::write_led(){
         id,
         SERVO_LED_CTRL_READ_LENGTH_RX,
         SERVO_LED_CTRL_READ_ID,
-        led
+        digitalRead(A4)
+	);
+}
+
+void handler::write_move_time(){
+    // this purposefully overflows to let the master know it is a negative value
+    uint16_t pos = (uint16_t)(fmap(set_point, 0, 360, -250, 1250));
+    servo_write(
+        id,
+        SERVO_MOVE_TIME_READ_LENGTH_RX,
+        SERVO_MOVE_TIME_READ_ID,
+        (uint8_t)(pos & 0xFF),
+        (uint8_t)(pos >> 8),
+        0, // we do not use the time parameter
+        0
 	);
 }
 
@@ -164,6 +178,17 @@ void handler::handle(){
                 break;
             case SERVO_LED_CTRL_READ_ID:
                 write_led();
+                break;
+            case SERVO_MOVE_TIME_WRITE_ID:{
+                digitalWrite(A4, HIGH);
+                int32_t pos = (uint16_t)params[0] | ((uint16_t)(params[1]) << 8); // get 16 bit unsigned value
+                pos = pos > 32767 ? pos - 65536 : pos; // make it negative if overflowed
+                set_point = fmap(pos, -250, 1250, 0, 360);  // -250..1250 -> 0..360
+                // time is ignored
+                break;
+            }
+            case SERVO_MOVE_TIME_READ_ID:
+                write_move_time();
                 break;
         }
     } else if(_id == 0xFE && cmd == SERVO_ID_READ_ID) {
