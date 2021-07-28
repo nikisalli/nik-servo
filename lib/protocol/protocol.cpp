@@ -4,19 +4,6 @@
 
 #include "protocol.h"
 
-// hardware
-float get_pos(){
-    return analogRead(A1) / 2.841666666f; // 0..1023 -> 0..360
-}
-
-float get_cur(){
-    return fmap(analogRead(A0), 0, 1023, -12.5, 12.5);
-}
-
-float get_torque(){
-    return fmap(analogRead(A0), 0, 1023, -8.75, 8.75);
-}
-
 // helpers
 uint8_t cpl2int(uint8_t val){
     return 0x80 & val ? (0x7F & val) - 0x80 : val;  // fast inverse 2's complement
@@ -102,7 +89,7 @@ void handler::write_angle_offset(){
 
 void handler::write_pos(){
     // this purposefully overflows to let the master know it is a negative value
-    uint16_t pos = (uint16_t)(fmap(analogRead(A1), 0, 1023, -250, 1250));
+    uint16_t pos = (uint16_t)(fmap(bposition, 0, 1023, -250, 1250));
     servo_write(
         id,
         SERVO_POS_READ_LENGTH_RX,
@@ -145,13 +132,12 @@ void handler::write_move_time(){
 }
 
 void handler::write_cur(){
-    uint16_t cur = analogRead(A0);
     servo_write(
         id,
         SERVO_CUR_READ_LENGTH_RX,
         SERVO_CUR_READ_ID,
-        (uint8_t)(cur & 0xFF),
-        (uint8_t)(cur >> 8)
+        (uint8_t)(bcurrent & 0xFF),
+        (uint8_t)(bcurrent >> 8)
 	);
 }
 
@@ -192,6 +178,16 @@ void handler::write_torque_params(){
         (uint8_t)(ti & 0xFF),
         (uint8_t)(ti >> 8)
 	);
+}
+
+void handler::update_data(){
+    cli();
+    bposition = analogRead(A1);
+    bcurrent = analogRead(A0);
+    position = bposition / 2.841666666f; // 0..1023 -> 0..360
+    current = fmap(bcurrent, 0, 1023, -12.5, 12.5);
+    torque = fmap(analogRead(A0), 0, 1023, -8.75, 8.75);
+    sei();
 }
 
 // handler
@@ -252,10 +248,12 @@ void handler::handle(){
                 write_led();
                 break;
             case SERVO_MOVE_TIME_WRITE_ID:{
+                cli();
                 int32_t pos = params[0] | ((params[1]) << 8); // get 16 bit unsigned value
                 pos = pos > 32767 ? pos - 65536 : pos; // make it negative if overflowed
                 set_point = fmap(pos, -250, 1250, 0, 360);  // -250..1250 -> 0..360
                 // time is ignored
+                sei();
                 break;
             }
             case SERVO_MOVE_TIME_READ_ID:
@@ -265,14 +263,18 @@ void handler::handle(){
                 write_cur();
                 break;
             case SERVO_TORQUE_LIMIT_WRITE_ID:
+                cli();
                 max_torque = fmap(params[0] | ((params[1]) << 8), 0, 2000, 0, 2);
+                sei();
                 break;
             case SERVO_TORQUE_LIMIT_READ_ID:
                 write_torque_limit();
                 break;
             case SERVO_POS_PARAMS_WRITE_ID:
+                cli();
                 pos_kc = (params[0] | ((params[1]) << 8)) / 100.f;
                 pos_inv_ti = (params[2] | ((params[3]) << 8)) / 100.f;
+                sei();
                 eeprom_write_byte(EEPROM_POS_KC_L, params[0]);
                 eeprom_write_byte(EEPROM_POS_KC_H, params[1]);
                 eeprom_write_byte(EEPROM_POS_INV_TI_L, params[2]);
@@ -282,8 +284,10 @@ void handler::handle(){
                 write_pos_params();
                 break;
             case SERVO_TORQUE_PARAMS_WRITE_ID:
+                cli();
                 torque_kc = (params[0] | ((params[1]) << 8)) / 100.f;
                 torque_inv_ti = (params[2] | ((params[3]) << 8)) / 100.f;
+                sei();
                 eeprom_write_byte(EEPROM_TORQUE_KC_L, params[0]);
                 eeprom_write_byte(EEPROM_TORQUE_KC_H, params[1]);
                 eeprom_write_byte(EEPROM_TORQUE_INV_TI_L, params[2]);

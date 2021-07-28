@@ -26,8 +26,8 @@ void set_motor(int16_t val){
 ISR(TIMER2_COMPA_vect){
     PORTC |= _BV(PC4);
 
-    float pos_error = get_pos() - proto.set_point;
-    // float torque_error = get_torque() - proto.max_torque;
+    float pos_error = proto.position - proto.set_point;
+    // float torque_error = proto.torque - proto.max_torque;
 
     pos_integral += pos_error * 0.002;  // dt is constant and equal to 1/500Hz = 0.002s
     float pos_out = proto.pos_kc * (pos_error + proto.pos_inv_ti * pos_integral);
@@ -64,6 +64,7 @@ int main(void){
     TIMSK2 |= _BV(OCIE2A); // enable timer 2 overflow interrupt
 
     while(1){
+        proto.update_data();
         proto.handle();
     }
     return 0;

@@ -93,11 +93,6 @@
 // global helpers
 float fmap(float x, float in_min, float in_max, float out_min, float out_max);
 
-// hardware
-float get_pos();
-float get_cur();
-float get_torque();
-
 class handler{
     public:
         uint8_t id = 0;
@@ -108,13 +103,21 @@ class handler{
         volatile float set_point = 150;
         volatile bool loaded = false;
         volatile float max_torque = 2;
+
         volatile float pos_kc = 10;
         volatile float pos_inv_ti = 0;
         volatile float torque_kc = 0;
         volatile float torque_inv_ti = 0;
 
+        volatile uint16_t bposition;
+        volatile float position;
+        volatile uint16_t bcurrent;
+        volatile float current;
+        volatile float torque;
+
         handler();                 // initialize with eeprom vals
         void handle();             // parse serial bus
+        void update_data();
         void write_id();
         void write_angle_offset();
         void write_pos();
