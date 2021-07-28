@@ -192,13 +192,13 @@ void handler::update_data(){
 
 // handler
 void handler::handle(){
-    wait_for_bytes(3, 10);                   // wait for 3 bytes with 10ms timeout
+    wait_for_bytes(3, 20);                   // wait for 3 bytes with 10ms timeout
     if(Serial.read() != HEADER_BYTE) return; // match first header byte
     if(Serial.read() != HEADER_BYTE) return; // match second header byte
     uint8_t res = Serial.read();             // if the header is matched get id
     if(res != id && res != SERVO_BROADCAST_ID) return; // check if the command is directed to us or broadcasted
 
-    wait_for_bytes(2, 10);
+    wait_for_bytes(2, 20);
     uint8_t length = Serial.read();         // read length
     uint8_t cmd = Serial.read();            // read cmd id
     uint8_t _id = res;
@@ -207,7 +207,7 @@ void handler::handle(){
 
     uint8_t sum = _id + length + cmd;
 
-    wait_for_bytes(length - 2, 10);
+    wait_for_bytes(length - 2, 20);
 
     for(uint8_t i = 0; i < length - 2; i++){ //iterate until the packet has been fully read
         params[i] = Serial.read();
