@@ -100,24 +100,20 @@ class handler{
         bool led = false;
 
         // volatiles to be used in the ISR
-        volatile float set_point = 150;
-        volatile bool loaded = false;
-        volatile float max_torque = 2;
+        float set_point = 150;
+        bool loaded = false;
+        float max_torque = 2;
 
-        volatile float pos_kc = 10;
-        volatile float pos_inv_ti = 0;
-        volatile float torque_kc = 0;
-        volatile float torque_inv_ti = 0;
+        float pos_kc = 10;
+        float pos_inv_ti = 0;
+        float torque_kc = 0;
+        float torque_inv_ti = 0;
 
-        volatile uint16_t bposition;
-        volatile float position;
-        volatile uint16_t bcurrent;
-        volatile float current;
-        volatile float torque;
+        uint16_t position;
+        uint16_t current;
 
         handler();                 // initialize with eeprom vals
         void handle();             // parse serial bus
-        void update_data();
         void write_id();
         void write_angle_offset();
         void write_pos();

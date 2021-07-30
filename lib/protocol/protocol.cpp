@@ -26,15 +26,9 @@ void servo_rx_enb() {
 	PORTC &= ~_BV(PC3);
 }
 
-uint8_t wait_for_bytes(uint8_t num, uint8_t timeout){
-    uint16_t iters = 0;
-    while(Serial.available() < num){
-        if(iters++ > timeout){
-            return 0;
-        }
-        delayMicroseconds(1000);
-    }
-    return 1;
+uint8_t read_byte(){
+    while(!Serial.available());
+    return Serial.read();
 }
 
 // packet construction
@@ -89,7 +83,9 @@ void handler::write_angle_offset(){
 
 void handler::write_pos(){
     // this purposefully overflows to let the master know it is a negative value
-    uint16_t pos = (uint16_t)(fmap(bposition, 0, 1023, -250, 1250));
+    cli();
+    uint16_t pos = (uint16_t)(fmap(position, 0, 1023, -250, 1250));
+    sei();
     servo_write(
         id,
         SERVO_POS_READ_LENGTH_RX,
@@ -132,12 +128,15 @@ void handler::write_move_time(){
 }
 
 void handler::write_cur(){
+    cli();
+    uint16_t cur = current;
+    sei();
     servo_write(
         id,
         SERVO_CUR_READ_LENGTH_RX,
         SERVO_CUR_READ_ID,
-        (uint8_t)(bcurrent & 0xFF),
-        (uint8_t)(bcurrent >> 8)
+        (uint8_t)(cur & 0xFF),
+        (uint8_t)(cur >> 8)
 	);
 }
 
@@ -180,38 +179,25 @@ void handler::write_torque_params(){
 	);
 }
 
-void handler::update_data(){
-    cli();
-    bposition = analogRead(A1);
-    bcurrent = analogRead(A0);
-    position = bposition / 2.841666666f; // 0..1023 -> 0..360
-    current = fmap(bcurrent, 0, 1023, -12.5, 12.5);
-    torque = fmap(analogRead(A0), 0, 1023, -8.75, 8.75);
-    sei();
-}
+// position = bposition / 2.841666666f; // 0..1023 -> 0..360
+// current = fmap(bcurrent, 0, 1023, -12.5, 12.5);
+// torque = fmap(analogRead(A0), 0, 1023, -8.75, 8.75);
 
 // handler
 void handler::handle(){
-    wait_for_bytes(3, 20);                   // wait for 3 bytes with 10ms timeout
-    if(Serial.read() != HEADER_BYTE) return; // match first header byte
-    if(Serial.read() != HEADER_BYTE) return; // match second header byte
-    uint8_t res = Serial.read();             // if the header is matched get id
-    if(res != id && res != SERVO_BROADCAST_ID) return; // check if the command is directed to us or broadcasted
+    if(read_byte() != HEADER_BYTE) return; // match first header byte
+    if(read_byte() != HEADER_BYTE) return; // match second header byte
+    uint8_t _id = read_byte();             // if the header is matched get id
+    if(_id != id && _id != SERVO_BROADCAST_ID) return; // check if the command is directed to us or broadcasted
 
-    wait_for_bytes(2, 20);
-    uint8_t length = Serial.read();         // read length
-    uint8_t cmd = Serial.read();            // read cmd id
-    uint8_t _id = res;
-
-    uint8_t params[7] = {};                    // read n parameters
-
+    uint8_t length = read_byte(); // read length
+    uint8_t cmd = read_byte(); // read cmd id
+    uint8_t params[7] = {}; // read n parameters
     uint8_t sum = _id + length + cmd;
 
-    wait_for_bytes(length - 2, 20);
-
     for(uint8_t i = 0; i < length - 2; i++){ //iterate until the packet has been fully read
-        params[i] = Serial.read();
-        if(i != length - 3) sum += params[i];   //do not sum checksum
+        params[i] = read_byte();
+        if(i != length - 3) sum += params[i]; //do not sum checksum
     }
 
     if(((~sum) & 0xFF) != (params[length - 3] & 0xFF)) return; //match checksum
@@ -248,12 +234,12 @@ void handler::handle(){
                 write_led();
                 break;
             case SERVO_MOVE_TIME_WRITE_ID:{
-                cli();
                 int32_t pos = params[0] | ((params[1]) << 8); // get 16 bit unsigned value
                 pos = pos > 32767 ? pos - 65536 : pos; // make it negative if overflowed
+                cli();
                 set_point = fmap(pos, -250, 1250, 0, 360);  // -250..1250 -> 0..360
-                // time is ignored
                 sei();
+                // time is ignored
                 break;
             }
             case SERVO_MOVE_TIME_READ_ID:
